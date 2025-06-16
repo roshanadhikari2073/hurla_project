@@ -1,0 +1,19 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+hurla-env/
+
+# Data files
+data/*.csv
+*.pcap
+*.md5
+
+# Model files
+models/*.h5
+models/*.keras
+
+# Mac system files
+.DS_Store
