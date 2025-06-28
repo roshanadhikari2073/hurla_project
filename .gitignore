@@ -8,6 +8,7 @@ hurla-env/
 
 # Data files
 data/*.csv
+data/*
 *.pcap
 *.md5
 
