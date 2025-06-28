@@ -10,23 +10,22 @@ def inject_anomalies(df, anomaly_ratio=0.01):
     df = df.copy()
     num_anomalies = int(anomaly_ratio * len(df))
 
-    # Add a label column
+    # Add a label column for ground truth
     df['label'] = 0
 
-    # Identify numerical columns only
+    # Identify numeric columns only (excluding label)
     numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-
     if 'label' in numeric_columns:
         numeric_columns.remove('label')
 
-    # Cast all numeric columns to float64 to allow safe noise addition
-    df[numeric_columns] = df[numeric_columns].astype(np.float64)
+    # Explicitly convert selected numeric columns to float64
+    df[numeric_columns] = df[numeric_columns].astype('float64')
 
     # Choose random rows to mark as anomalies
     anomaly_indices = np.random.choice(df.index, size=num_anomalies, replace=False)
     df.loc[anomaly_indices, 'label'] = 1
 
-    # Apply noise to numeric columns only
+    # Inject synthetic noise
     noise = np.random.normal(loc=0.5, scale=0.2, size=(num_anomalies, len(numeric_columns)))
     df.loc[anomaly_indices, numeric_columns] += noise
 

@@ -1,0 +1,323 @@
+config.py
+
+TRAIN_PATH = "data/CICIDS2017.csv"
+TEST_PATH = "data/synthetic_zero_day_features.csv"
+THRESHOLD = 1.337239748893787e-06  # or your last threshold value
+
+MODEL_PATH = "models/autoencoder_model.keras"
+Q_TABLE_PATH = "models/q_table.npy"  # New: path for persisting Q-table
+
+
+################################################################################
+
+generate_test_with_anomalies.py
+
+import pandas as pd
+import numpy as np
+import os
+
+INPUT_PATH = 'data/CICIDS2017.csv'
+OUTPUT_PATH = 'data/synthetic_zero_day.csv'
+FEATURE_OUTPUT = 'data/synthetic_zero_day_features.csv'  # only features, for model testing
+
+def inject_anomalies(df, anomaly_ratio=0.01):
+    df = df.copy()
+    num_anomalies = int(anomaly_ratio * len(df))
+
+    # Add a label column for ground truth
+    df['label'] = 0
+
+    # Identify numeric columns only (excluding label)
+    numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+    if 'label' in numeric_columns:
+        numeric_columns.remove('label')
+
+    # Explicitly convert selected numeric columns to float64
+    df[numeric_columns] = df[numeric_columns].astype('float64')
+
+    # Choose random rows to mark as anomalies
+    anomaly_indices = np.random.choice(df.index, size=num_anomalies, replace=False)
+    df.loc[anomaly_indices, 'label'] = 1
+
+    # Inject synthetic noise
+    noise = np.random.normal(loc=0.5, scale=0.2, size=(num_anomalies, len(numeric_columns)))
+    df.loc[anomaly_indices, numeric_columns] += noise
+
+    return df, numeric_columns
+
+def main():
+    if not os.path.exists(INPUT_PATH):
+        print(f"Input file {INPUT_PATH} not found.")
+        return
+
+    df = pd.read_csv(INPUT_PATH)
+    df_with_anomalies, feature_columns = inject_anomalies(df)
+
+    # Save full dataset with labels for later evaluation
+    df_with_anomalies.to_csv(OUTPUT_PATH, index=False)
+
+    # Save just the feature columns for feeding into model
+    df_with_anomalies[feature_columns].to_csv(FEATURE_OUTPUT, index=False)
+    print(f"Saved labeled anomalies to {OUTPUT_PATH}")
+    print(f"Saved feature-only test set to {FEATURE_OUTPUT}")
+
+if __name__ == '__main__':
+    main()
+
+################################################################################
+
+hurla_pipeline.py
+
+# --------------------------------------
+# hurla_pipeline.py (MAJOR CHANGES)
+# --------------------------------------
+# We import and integrate QLearningAgent.
+
+import numpy as np
+import time
+import os
+import pandas as pd  # Required for label reading
+
+from models.autoencoder import AutoencoderModel
+from utils.preprocessing import preprocess_data
+from utils.evaluation import evaluate
+from tensorflow.keras.models import load_model
+from models.q_learning_agent import QLearningAgent  # New: import Q-learning agent
+
+import config
+
+MODEL_PATH = config.MODEL_PATH
+Q_TABLE_PATH = config.Q_TABLE_PATH  # New: file path for Q-table persistence
+
+
+def run_pipeline(train_path, test_path):
+    # Load or train autoencoder
+    if os.path.exists(MODEL_PATH):
+        print("Loading existing model...")
+        model = load_model(MODEL_PATH)
+        ae = AutoencoderModel(model=model)
+        threshold = config.THRESHOLD
+        print(f"Using threshold from config.py: {threshold}")
+    else:
+        print("Training new autoencoder model...")
+        x_train = preprocess_data(train_path)
+
+        ae = AutoencoderModel(input_dim=x_train.shape[1])
+        ae.train(x_train, epochs=10, batch_size=256)
+
+        print("Saving trained model...")
+        ae.model.save(MODEL_PATH)
+
+        print("Calculating 95th percentile threshold from reconstruction error...")
+        train_recon = ae.model.predict(x_train, verbose=0)
+        train_scores = np.mean(np.square(x_train - train_recon), axis=1)
+        threshold = np.percentile(train_scores, 95)
+
+        with open("config.py", "r") as f:
+            lines = f.readlines()
+
+        with open("config.py", "w") as f:
+            for line in lines:
+                if line.startswith("THRESHOLD"):
+                    f.write(f"THRESHOLD = {threshold}\n")
+                else:
+                    f.write(line)
+
+        print(f"Threshold saved to config.py: {threshold}")
+
+    print("Loading test data...")
+    x_test = preprocess_data(test_path)
+
+    print("Running prediction on test data...")
+    start = time.time()
+    recons = ae.model.predict(x_test, verbose=1)
+    scores = np.mean(np.square(x_test - recons), axis=1)
+    latency = (time.time() - start) / len(x_test)
+
+    # New: Initialize Q-learning agent
+    agent = QLearningAgent(state_size=10, action_size=3)
+    agent.load_q_table(Q_TABLE_PATH)
+
+    print("Using Q-learning agent to adapt threshold...")
+    preds = []
+    mean_score = np.mean(scores)
+    state = min(int(mean_score * 10), 9)  # Discretize score for state mapping
+    action = agent.choose_action(state)
+
+    if action == 0:
+        threshold *= 0.9
+    elif action == 2:
+        threshold *= 1.1
+
+    # Log agent's decision and the adjusted threshold
+    action_meaning = {0: "DECREASE", 1: "KEEP", 2: "INCREASE"}
+    print(f"Q-agent decision: {action_meaning[action]} threshold → {threshold:.10f}")
+    
+    for s in scores:
+        preds.append(1 if s > threshold else 0)
+
+    try:
+        labels_df = pd.read_csv(test_path)
+        if 'label' in labels_df.columns:
+            labels = labels_df['label'].values
+        else:
+            labels = [0] * len(x_test)
+    except:
+        labels = [0] * len(x_test)
+
+    metrics = evaluate(preds, labels)
+    print(metrics)
+    print(f"Avg Latency: {latency * 1000:.2f} ms")
+
+    # New: reward and Q-table update
+    accuracy = metrics['Accuracy']
+    reward = 1.0 if accuracy > 0.95 else -1.0
+    next_state = state  # Simplified assumption
+    agent.update(state, action, reward, next_state)
+    agent.save_q_table(Q_TABLE_PATH)
+    print("Q-table updated and saved.")
+
+
+################################################################################
+
+run_experiment.py
+
+from hurla_pipeline import train_autoencoder
+
+if __name__ == "__main__":
+    train_autoencoder()
+
+################################################################################
+
+test_preprocessing.py
+
+from utils.preprocessing import load_and_preprocess
+
+X = load_and_preprocess('data/CICIDS2017.csv')
+print(f"Data shape: {X.shape}")
+print(f"Sample row: {X[0]}")
+
+
+################################################################################
+
+models/autoencoder.py
+
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense
+from tensorflow.keras import regularizers
+
+class AutoencoderModel:
+    def __init__(self, input_dim=None, model=None):
+        if model:
+            self.model = model
+            self.input_dim = self.model.input_shape[1]
+            self.encoder = Model(inputs=self.model.input, outputs=self.model.get_layer("bottleneck").output)
+        elif input_dim:
+            self.input_dim = input_dim
+            self.model = self.build_model()
+            self.encoder = Model(inputs=self.model.input, outputs=self.model.get_layer("bottleneck").output)
+        else:
+            raise ValueError("Either input_dim or model must be provided.")
+
+    def build_model(self):
+        input_layer = Input(shape=(self.input_dim,))
+        encoded = Dense(64, activation="relu")(input_layer)
+        encoded = Dense(32, activation="relu")(encoded)
+        bottleneck = Dense(16, activation="relu", name="bottleneck")(encoded)
+        decoded = Dense(32, activation="relu")(bottleneck)
+        decoded = Dense(64, activation="relu")(decoded)
+        output_layer = Dense(self.input_dim, activation="sigmoid")(decoded)
+
+        autoencoder = Model(inputs=input_layer, outputs=output_layer)
+        autoencoder.compile(optimizer='adam', loss='mse')
+        return autoencoder
+
+    def train(self, X, epochs=10, batch_size=512):
+        self.model.fit(X, X, epochs=epochs, batch_size=batch_size, shuffle=True)
+
+    def encode(self, X):
+        return self.encoder.predict(X)
+
+################################################################################
+
+models/q_learning_agent.py
+
+# ----------------------------------------
+# models/q_learning_agent.py (UPDATED)
+# ----------------------------------------
+# We add save/load functions to persist the Q-table.
+
+import numpy as np
+import os
+
+class QLearningAgent:
+    def __init__(self, state_size, action_size, learning_rate=0.1, discount=0.95, epsilon=0.1):
+        self.q_table = np.zeros((state_size, action_size))
+        self.lr = learning_rate
+        self.gamma = discount
+        self.epsilon = epsilon
+        self.action_space = [0, 1, 2]  # DECREASE, KEEP, INCREASE
+
+    def choose_action(self, state_idx):
+        if np.random.rand() < self.epsilon:
+            return np.random.choice(self.action_space)
+        return np.argmax(self.q_table[state_idx])
+
+    def update(self, state_idx, action, reward, next_state_idx):
+        best_next = np.max(self.q_table[next_state_idx])
+        self.q_table[state_idx, action] += self.lr * (reward + self.gamma * best_next - self.q_table[state_idx, action])
+
+    def save_q_table(self, path):
+        np.save(path, self.q_table)
+
+    def load_q_table(self, path):
+        if os.path.exists(path):
+            self.q_table = np.load(path)
+            print(f"Loaded Q-table from {path}")
+        else:
+            print("Q-table file not found. Using fresh Q-table.")
+
+################################################################################
+
+utils/evaluation.py
+
+from sklearn.metrics import confusion_matrix, f1_score, accuracy_score
+
+def evaluate(preds, labels):
+    tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
+    acc = accuracy_score(labels, preds)
+    f1 = f1_score(labels, preds)
+    fpr = fp / (fp + tn)
+    return {"Accuracy": acc, "F1": f1, "FPR": fpr}
+
+
+################################################################################
+
+utils/preprocessing.py
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+
+def load_and_preprocess(csv_path):
+    df = pd.read_csv(csv_path)
+    df.dropna(inplace=True)
+
+    # Drop non-numeric or irrelevant fields
+    for col in ['ip.src', 'ip.dst', 'frame.time_epoch']:
+        if col in df.columns:
+            df.drop(columns=[col], inplace=True)
+
+    df = df.apply(pd.to_numeric, errors='coerce')
+    df.dropna(inplace=True)
+
+    scaler = MinMaxScaler()
+    X = scaler.fit_transform(df)
+
+    return X
+
+# Alias to match import in hurla_pipeline.py
+preprocess_data = load_and_preprocess
+
+
+################################################################################

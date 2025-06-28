@@ -1,17 +1,27 @@
+# --------------------------------------
+# hurla_pipeline.py (MAJOR CHANGES)
+# --------------------------------------
+# We import and integrate QLearningAgent.
+
 import numpy as np
 import time
 import os
+import pandas as pd  # Required for label reading
 
 from models.autoencoder import AutoencoderModel
 from utils.preprocessing import preprocess_data
 from utils.evaluation import evaluate
 from tensorflow.keras.models import load_model
+from models.q_learning_agent import QLearningAgent  # New: import Q-learning agent
 
 import config
 
-MODEL_PATH = "models/autoencoder_model.keras"
+MODEL_PATH = config.MODEL_PATH
+Q_TABLE_PATH = config.Q_TABLE_PATH  # New: file path for Q-table persistence
+
 
 def run_pipeline(train_path, test_path):
+    # Load or train autoencoder
     if os.path.exists(MODEL_PATH):
         print("Loading existing model...")
         model = load_model(MODEL_PATH)
@@ -54,9 +64,28 @@ def run_pipeline(train_path, test_path):
     scores = np.mean(np.square(x_test - recons), axis=1)
     latency = (time.time() - start) / len(x_test)
 
-    preds = [1 if s > threshold else 0 for s in scores]
+    # New: Initialize Q-learning agent
+    agent = QLearningAgent(state_size=10, action_size=3)
+    agent.load_q_table(Q_TABLE_PATH)
 
-    # If 'label' column exists in test CSV, load it
+    print("Using Q-learning agent to adapt threshold...")
+    preds = []
+    mean_score = np.mean(scores)
+    state = min(int(mean_score * 10), 9)  # Discretize score for state mapping
+    action = agent.choose_action(state)
+
+    if action == 0:
+        threshold *= 0.9
+    elif action == 2:
+        threshold *= 1.1
+
+    # Log agent's decision and the adjusted threshold
+    action_meaning = {0: "DECREASE", 1: "KEEP", 2: "INCREASE"}
+    print(f"Q-agent decision: {action_meaning[action]} threshold → {threshold:.10f}")
+    
+    for s in scores:
+        preds.append(1 if s > threshold else 0)
+
     try:
         labels_df = pd.read_csv(test_path)
         if 'label' in labels_df.columns:
@@ -66,5 +95,14 @@ def run_pipeline(train_path, test_path):
     except:
         labels = [0] * len(x_test)
 
-    print(evaluate(preds, labels))
+    metrics = evaluate(preds, labels)
+    print(metrics)
     print(f"Avg Latency: {latency * 1000:.2f} ms")
+
+    # New: reward and Q-table update
+    accuracy = metrics['Accuracy']
+    reward = 1.0 if accuracy > 0.95 else -1.0
+    next_state = state  # Simplified assumption
+    agent.update(state, action, reward, next_state)
+    agent.save_q_table(Q_TABLE_PATH)
+    print("Q-table updated and saved.")
