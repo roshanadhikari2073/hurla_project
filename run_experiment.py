@@ -1,4 +1,5 @@
-from hurla_pipeline import train_autoencoder
+from hurla_pipeline import run_pipeline
+import config
 
 if __name__ == "__main__":
-    train_autoencoder()
+    run_pipeline(config.TRAIN_PATH, config.TEST_PATH)
