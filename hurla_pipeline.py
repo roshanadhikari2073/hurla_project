@@ -19,9 +19,12 @@ import config
 # Set up environment-driven anomaly naming
 ANOMALY_TYPE = os.environ.get("ANOMALY_TYPE", "default")
 LOG_DIR = "logs"
+Q_VALUES_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_q_values_log.csv"
 THRESHOLD_TRACKER_FILE = f"{LOG_DIR}/{ANOMALY_TYPE}_last_threshold.txt"
 THRESHOLD_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_threshold_log.csv"
 METRICS_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_metrics_log.csv"
+METRICS_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_metrics_log.csv"
+Q_VALUES_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_q_values_log.csv"
 
 MODEL_PATH = config.MODEL_PATH
 Q_TABLE_PATH = config.Q_TABLE_PATH
@@ -81,6 +84,22 @@ def run_pipeline(train_path, test_path):
     action = agent.choose_action(state)
     original_threshold = threshold
 
+    # Log Q-values for current state
+    q_values = agent.q_table[state]
+    q_log = {
+        "timestamp": datetime.now().isoformat(),
+        "batch_file": os.path.basename(test_path),
+        "state": state,
+        "chosen_action": action
+    }
+    for i, val in enumerate(q_values):
+        q_log[f"q_value_action_{i}"] = val
+
+    pd.DataFrame([q_log]).to_csv(
+        Q_VALUES_LOG_PATH, mode='a', index=False, header=not os.path.exists(Q_VALUES_LOG_PATH)
+    )
+
+    # Adjust threshold based on Q-agent action
     if action == 0:
         threshold *= 0.9
     elif action == 2:
@@ -111,17 +130,23 @@ def run_pipeline(train_path, test_path):
     try:
         labels_df = pd.read_csv(test_path)
         labels = labels_df['label'].values if 'label' in labels_df.columns else [0] * len(x_test)
-    except:
+    except Exception as e:
+        print(f"Warning: Failed to load labels from {test_path}, defaulting to 0s. Error: {e}")
         labels = [0] * len(x_test)
 
-    metrics = evaluate(preds, labels)
-    metrics["timestamp"] = datetime.now().isoformat()
-    metrics["batch_file"] = os.path.basename(test_path)
-    metrics["latency_ms"] = latency * 1000
+    raw_metrics = evaluate(preds, labels)
+    metrics = {
+        "timestamp": datetime.now().isoformat(),
+        "batch_file": os.path.basename(test_path),
+        "Accuracy": float(raw_metrics.get("Accuracy", 0)),
+        "F1": float(raw_metrics.get("F1", 0)),
+        "FPR": float(raw_metrics.get("FPR", 0)),
+        "latency_ms": float(latency * 1000)
+    }
 
     print(metrics)
 
-    # Save metrics log
+    os.makedirs(os.path.dirname(METRICS_LOG_PATH), exist_ok=True)
     pd.DataFrame([metrics]).to_csv(
         METRICS_LOG_PATH, mode='a', index=False, header=not os.path.exists(METRICS_LOG_PATH)
     )
