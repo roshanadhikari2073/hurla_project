@@ -1,21 +1,19 @@
+# run_batches.py
 import os
 import glob
-from hurla_pipeline import run_pipeline
 import config
+from hurla_pipeline import run_pipeline
 
-# define the parent directory containing all batches (you can change this)
+# Directory and anomaly type config
 BATCH_DIR = "data/gaussian_batches"
+ANOMALY_TYPE = "gaussian"
+os.environ["ANOMALY_TYPE"] = ANOMALY_TYPE
 
-# scan for all feature CSV files ending in _features.csv inside that directory
+# Locate all batch files
 feature_files = sorted(glob.glob(os.path.join(BATCH_DIR, "*_features.csv")))
-
-# sanity check: print how many batches we found
 print(f"Found {len(feature_files)} batches in '{BATCH_DIR}'")
 
-# loop through each batch file and run the main pipeline
+# Run each batch through the pipeline
 for i, test_path in enumerate(feature_files, start=1):
     print(f"\n=== Batch {i}: Running pipeline for {os.path.basename(test_path)} ===")
     run_pipeline(config.TRAIN_PATH, test_path)
-
-
-
