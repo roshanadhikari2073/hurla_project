@@ -1,5 +1,5 @@
 # --------------------------------------
-# hurla_pipeline.py (FULL PIPELINE WITH LOGGING)
+# hurla_pipeline.py (FULL PIPELINE WITH ENHANCED REWARD SIGNAL)
 # --------------------------------------
 
 import numpy as np
@@ -19,15 +19,16 @@ import config
 # Set up environment-driven anomaly naming
 ANOMALY_TYPE = os.environ.get("ANOMALY_TYPE", "default")
 LOG_DIR = "logs"
-Q_VALUES_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_q_values_log.csv"
 THRESHOLD_TRACKER_FILE = f"{LOG_DIR}/{ANOMALY_TYPE}_last_threshold.txt"
 THRESHOLD_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_threshold_log.csv"
 METRICS_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_metrics_log.csv"
-METRICS_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_metrics_log.csv"
-Q_VALUES_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_q_values_log.csv"
+REWARD_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_reward_log.csv"
 
 MODEL_PATH = config.MODEL_PATH
 Q_TABLE_PATH = config.Q_TABLE_PATH
+
+# Initialize global to track previous F1 score
+global_prev_f1 = None
 
 def run_pipeline(train_path, test_path):
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -84,22 +85,6 @@ def run_pipeline(train_path, test_path):
     action = agent.choose_action(state)
     original_threshold = threshold
 
-    # Log Q-values for current state
-    q_values = agent.q_table[state]
-    q_log = {
-        "timestamp": datetime.now().isoformat(),
-        "batch_file": os.path.basename(test_path),
-        "state": state,
-        "chosen_action": action
-    }
-    for i, val in enumerate(q_values):
-        q_log[f"q_value_action_{i}"] = val
-
-    pd.DataFrame([q_log]).to_csv(
-        Q_VALUES_LOG_PATH, mode='a', index=False, header=not os.path.exists(Q_VALUES_LOG_PATH)
-    )
-
-    # Adjust threshold based on Q-agent action
     if action == 0:
         threshold *= 0.9
     elif action == 2:
@@ -130,28 +115,44 @@ def run_pipeline(train_path, test_path):
     try:
         labels_df = pd.read_csv(test_path)
         labels = labels_df['label'].values if 'label' in labels_df.columns else [0] * len(x_test)
-    except Exception as e:
-        print(f"Warning: Failed to load labels from {test_path}, defaulting to 0s. Error: {e}")
+    except:
         labels = [0] * len(x_test)
 
-    raw_metrics = evaluate(preds, labels)
-    metrics = {
-        "timestamp": datetime.now().isoformat(),
-        "batch_file": os.path.basename(test_path),
-        "Accuracy": float(raw_metrics.get("Accuracy", 0)),
-        "F1": float(raw_metrics.get("F1", 0)),
-        "FPR": float(raw_metrics.get("FPR", 0)),
-        "latency_ms": float(latency * 1000)
-    }
+    metrics = evaluate(preds, labels)
+    metrics["timestamp"] = datetime.now().isoformat()
+    metrics["batch_file"] = os.path.basename(test_path)
+    metrics["latency_ms"] = latency * 1000
 
     print(metrics)
 
-    os.makedirs(os.path.dirname(METRICS_LOG_PATH), exist_ok=True)
+    # Save metrics log
     pd.DataFrame([metrics]).to_csv(
         METRICS_LOG_PATH, mode='a', index=False, header=not os.path.exists(METRICS_LOG_PATH)
     )
 
-    reward = 1.0 if metrics['Accuracy'] > 0.95 else -1.0
+    # Enhanced reward shaping
+    global global_prev_f1
+    prev_f1 = global_prev_f1 or metrics['F1']
+    delta_f1 = metrics['F1'] - prev_f1
+    fpr_penalty = metrics['FPR']
+
+    reward = (delta_f1 * 10.0) - (fpr_penalty * 2.5)
+
+    global_prev_f1 = metrics['F1']
+
+    reward_log = {
+        "timestamp": metrics["timestamp"],
+        "batch_file": metrics["batch_file"],
+        "reward": reward,
+        "delta_f1": delta_f1,
+        "FPR": metrics['FPR'],
+        "action": action_meaning[action],
+        "threshold": threshold
+    }
+    pd.DataFrame([reward_log]).to_csv(
+        REWARD_LOG_PATH, mode='a', index=False, header=not os.path.exists(REWARD_LOG_PATH)
+    )
+
     next_state = state
     agent.update(state, action, reward, next_state)
     agent.save_q_table(Q_TABLE_PATH)
