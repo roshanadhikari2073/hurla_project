@@ -54,10 +54,12 @@ def run_pipeline(train_path, test_path):
         ae.train(x_train, epochs=10, batch_size=256)
         ae.model.save(MODEL_PATH)
 
-        print("Calculating 95th percentile threshold...")
+        print("Calculating 98th percentile threshold from reconstruction error...")
         recon = ae.model.predict(x_train, verbose=0)
         scores = np.mean(np.square(x_train - recon), axis=1)
-        threshold = np.percentile(scores, 95)
+        threshold = np.percentile(scores, 98)
+
+        print(f"Initial threshold (98th percentile): {threshold}")
 
         with open("config.py", "r") as f:
             lines = f.readlines()
@@ -137,7 +139,6 @@ def run_pipeline(train_path, test_path):
     fpr_penalty = metrics['FPR']
 
     reward = (delta_f1 * 10.0) - (fpr_penalty * 2.5)
-
     global_prev_f1 = metrics['F1']
 
     reward_log = {
