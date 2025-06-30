@@ -1,5 +1,5 @@
 # --------------------------------------
-# hurla_pipeline.py (FULL PIPELINE WITH ENHANCED REWARD SIGNAL)
+# hurla_pipeline.py (REFINED THRESHOLD + REWARD, NO WARM-UP)
 # --------------------------------------
 
 import numpy as np
@@ -16,7 +16,7 @@ from models.q_learning_agent import QLearningAgent
 
 import config
 
-# Set up environment-driven anomaly naming
+# Environment-based naming
 ANOMALY_TYPE = os.environ.get("ANOMALY_TYPE", "default")
 LOG_DIR = "logs"
 THRESHOLD_TRACKER_FILE = f"{LOG_DIR}/{ANOMALY_TYPE}_last_threshold.txt"
@@ -27,13 +27,13 @@ REWARD_LOG_PATH = f"{LOG_DIR}/{ANOMALY_TYPE}_reward_log.csv"
 MODEL_PATH = config.MODEL_PATH
 Q_TABLE_PATH = config.Q_TABLE_PATH
 
-# Initialize global to track previous F1 score
+# Global memory to track prior F1 score if needed
 global_prev_f1 = None
 
 def run_pipeline(train_path, test_path):
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # Load model or train it
+    # Load or train the autoencoder model
     if os.path.exists(MODEL_PATH):
         print("Loading existing model...")
         model = load_model(MODEL_PATH)
@@ -49,18 +49,22 @@ def run_pipeline(train_path, test_path):
     else:
         print("Training new autoencoder model...")
         x_train = preprocess_data(train_path)
-
         ae = AutoencoderModel(input_dim=x_train.shape[1])
         ae.train(x_train, epochs=10, batch_size=256)
         ae.model.save(MODEL_PATH)
 
-        print("Calculating 98th percentile threshold from reconstruction error...")
+        # --- NEW: Calculate MAD-based threshold instead of 98th percentile
+        print("Calculating MAD-based threshold from reconstruction error...")
         recon = ae.model.predict(x_train, verbose=0)
         scores = np.mean(np.square(x_train - recon), axis=1)
-        threshold = np.percentile(scores, 98)
 
-        print(f"Initial threshold (98th percentile): {threshold}")
+        median = np.median(scores)
+        mad = np.median(np.abs(scores - median))
+        threshold = median + 6 * mad  # Robust and tight threshold for Gaussian tails
 
+        print(f"Initial MAD-based threshold: {threshold}")
+
+        # Overwrite threshold in config.py
         with open("config.py", "r") as f:
             lines = f.readlines()
         with open("config.py", "w") as f:
@@ -79,27 +83,31 @@ def run_pipeline(train_path, test_path):
     scores = np.mean(np.square(x_test - recon), axis=1)
     latency = (time.time() - start) / len(x_test)
 
+    # Load Q-learning agent and state
     agent = QLearningAgent(state_size=10, action_size=3)
     agent.load_q_table(Q_TABLE_PATH)
 
     mean_score = np.mean(scores)
     state = min(int(mean_score * 10), 9)
-    action = agent.choose_action(state)
     original_threshold = threshold
 
-    if action == 0:
-        threshold *= 0.9
-    elif action == 2:
-        threshold *= 1.1
+    # --- Updated Q-learning logic with larger threshold step
+    action = agent.choose_action(state)
 
-    action_meaning = {0: "DECREASE", 1: "KEEP", 2: "INCREASE"}
+    STEP = 0.5  # 50% step size makes adjustments more impactful
+    if action == 0:
+        threshold *= (1 - STEP)
+    elif action == 2:
+        threshold *= (1 + STEP)
+
+    action_meaning = ["DECREASE", "KEEP", "INCREASE"]
     print(f"Q-agent decision: {action_meaning[action]} threshold → {threshold:.10f}")
 
-    # Save new threshold
+    # Save new threshold to tracker file
     with open(THRESHOLD_TRACKER_FILE, 'w') as f:
         f.write(str(threshold))
 
-    # Log threshold change
+    # Log threshold details
     threshold_log = {
         "timestamp": datetime.now().isoformat(),
         "batch_file": os.path.basename(test_path),
@@ -112,6 +120,7 @@ def run_pipeline(train_path, test_path):
         THRESHOLD_LOG_PATH, mode='a', index=False, header=not os.path.exists(THRESHOLD_LOG_PATH)
     )
 
+    # Predict anomalies
     preds = [1 if s > threshold else 0 for s in scores]
 
     try:
@@ -120,6 +129,7 @@ def run_pipeline(train_path, test_path):
     except:
         labels = [0] * len(x_test)
 
+    # Evaluate predictions and extract key metrics
     metrics = evaluate(preds, labels)
     metrics["timestamp"] = datetime.now().isoformat()
     metrics["batch_file"] = os.path.basename(test_path)
@@ -127,26 +137,23 @@ def run_pipeline(train_path, test_path):
 
     print(metrics)
 
-    # Save metrics log
+    # Save batch metrics log
     pd.DataFrame([metrics]).to_csv(
         METRICS_LOG_PATH, mode='a', index=False, header=not os.path.exists(METRICS_LOG_PATH)
     )
 
-    # Enhanced reward shaping
-    global global_prev_f1
-    prev_f1 = global_prev_f1 or metrics['F1']
-    delta_f1 = metrics['F1'] - prev_f1
-    fpr_penalty = metrics['FPR']
-
-    reward = (delta_f1 * 10.0) - (fpr_penalty * 2.5)
-    global_prev_f1 = metrics['F1']
+    # --- NEW: Reward based on TP - FP, a clearer signal
+    tp = metrics.get("TP", 0)
+    fp = metrics.get("FP", 0)
+    reward = tp - fp
 
     reward_log = {
         "timestamp": metrics["timestamp"],
         "batch_file": metrics["batch_file"],
         "reward": reward,
-        "delta_f1": delta_f1,
-        "FPR": metrics['FPR'],
+        "TP": tp,
+        "FP": fp,
+        "FPR": metrics["FPR"],
         "action": action_meaning[action],
         "threshold": threshold
     }
@@ -154,6 +161,7 @@ def run_pipeline(train_path, test_path):
         REWARD_LOG_PATH, mode='a', index=False, header=not os.path.exists(REWARD_LOG_PATH)
     )
 
+    # Q-table update based on reward
     next_state = state
     agent.update(state, action, reward, next_state)
     agent.save_q_table(Q_TABLE_PATH)
