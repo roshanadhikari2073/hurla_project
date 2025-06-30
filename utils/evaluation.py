@@ -1,17 +1,22 @@
 from sklearn.metrics import confusion_matrix, f1_score, accuracy_score
 
 def evaluate(preds, labels):
-    # Compute confusion matrix components
+    """
+    Evaluate classification performance using standard metrics,
+    including full confusion matrix components for reward shaping.
+    """
+
+    # Compute confusion matrix: TN, FP, FN, TP
     tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
 
-    # Standard metrics
-    acc = accuracy_score(labels, preds)
+    # Calculate standard classification metrics
+    accuracy = accuracy_score(labels, preds)
     f1 = f1_score(labels, preds, zero_division=0)
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
-    # Return extended metrics for deeper reward shaping
+    # Return a dictionary of evaluation metrics with clarity
     return {
-        "Accuracy": acc,
+        "Accuracy": accuracy,
         "F1": f1,
         "FPR": fpr,
         "TP": int(tp),

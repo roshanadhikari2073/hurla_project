@@ -10,26 +10,37 @@ def inject_anomalies(df, anomaly_ratio=0.01):
     df = df.copy()
     num_anomalies = int(anomaly_ratio * len(df))
 
-    # Add a label column for ground truth
     df['label'] = 0
 
-    # Identify numeric columns only (excluding label)
-    numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-    if 'label' in numeric_columns:
-        numeric_columns.remove('label')
+    # Choose sensitive features with high signal-to-noise impact
+    sensitive_cols = [
+        "Flow Duration",
+        "Total Fwd Packets",
+        "Fwd Packet Length Mean"
+    ]
 
-    # Explicitly convert selected numeric columns to float64
-    df[numeric_columns] = df[numeric_columns].astype('float64')
+    # Ensure all expected features exist
+    for col in sensitive_cols:
+        if col not in df.columns:
+            raise ValueError(f"Missing column: {col}")
 
-    # Choose random rows to mark as anomalies
+    # Convert to float for numerical stability
+    df[sensitive_cols] = df[sensitive_cols].astype('float64')
+
+    # Randomly pick rows to corrupt
     anomaly_indices = np.random.choice(df.index, size=num_anomalies, replace=False)
     df.loc[anomaly_indices, 'label'] = 1
 
-    # Inject synthetic noise
-    noise = np.random.normal(loc=0.5, scale=0.2, size=(num_anomalies, len(numeric_columns)))
-    df.loc[anomaly_indices, numeric_columns] += noise
+    # Inject amplified Gaussian noise into sensitive columns only
+    for col in sensitive_cols:
+        col_mean = df[col].mean()
+        col_std = df[col].std()
 
-    return df, numeric_columns
+        # Stronger anomaly signal: centered around +3σ with spread of 1.5σ
+        noise = np.random.normal(loc=3 * col_std, scale=1.5 * col_std, size=num_anomalies)
+        df.loc[anomaly_indices, col] += noise
+
+    return df, sensitive_cols
 
 def main():
     if not os.path.exists(INPUT_PATH):
@@ -37,15 +48,14 @@ def main():
         return
 
     df = pd.read_csv(INPUT_PATH)
-    df_with_anomalies, feature_columns = inject_anomalies(df)
+    df_with_anomalies, used_columns = inject_anomalies(df)
 
-    # Save full dataset with labels for later evaluation
     df_with_anomalies.to_csv(OUTPUT_PATH, index=False)
+    df_with_anomalies[used_columns].to_csv(FEATURE_OUTPUT, index=False)
 
-    # Save just the feature columns for feeding into model
-    df_with_anomalies[feature_columns].to_csv(FEATURE_OUTPUT, index=False)
     print(f"Saved labeled anomalies to {OUTPUT_PATH}")
     print(f"Saved feature-only test set to {FEATURE_OUTPUT}")
+    print(f"Injected strong noise into: {', '.join(used_columns)}")
 
 if __name__ == '__main__':
     main()

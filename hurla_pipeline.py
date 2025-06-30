@@ -60,9 +60,9 @@ def run_pipeline(train_path, test_path):
 
         median = np.median(scores)
         mad = np.median(np.abs(scores - median))
-        threshold = median + 6 * mad  # Robust and tight threshold for Gaussian tails
+        threshold = median + 10 * mad  # Relaxed threshold to prevent overflagging
 
-        print(f"Initial MAD-based threshold: {threshold}")
+        print(f"Initial relaxed threshold using MAD (median + 10*MAD): {threshold}")
 
         # Overwrite threshold in config.py
         with open("config.py", "r") as f:
