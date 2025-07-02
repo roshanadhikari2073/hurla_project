@@ -7,6 +7,9 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 
 from models.q_learning_agent import QLearningAgent
 
+THRESHOLD_MIN = 1e-4
+THRESHOLD_MAX = 1e-1
+
 MODEL_PATH = "models/autoencoder_model.keras"
 BATCH_DIR = "data/gaussian_batches"
 LOG_DIR = "logs"
@@ -83,6 +86,12 @@ for idx, feature_path in enumerate(batch_files, start=1):
         last_threshold *= 0.5
     elif action == 2:
         last_threshold *= 1.5
+        
+    last_threshold = np.clip(last_threshold, THRESHOLD_MIN, THRESHOLD_MAX)
+        
+    # Ensure threshold doesn't go below a practical floor
+    MIN_THRESHOLD = 1e-6
+    last_threshold = max(last_threshold, MIN_THRESHOLD)
 
     new_pred = (mse > last_threshold).astype(int)
     new_precision = precision_score(y, new_pred, zero_division=0)
@@ -92,7 +101,9 @@ for idx, feature_path in enumerate(batch_files, start=1):
 
     tp = int(np.sum((y == 1) & (new_pred == 1)))
     fp = int(np.sum((y == 0) & (new_pred == 1)))
-    reward = tp - fp
+    prev_f1 = f1  # from earlier, before threshold adjustment
+    delta_f1 = new_f1 - prev_f1
+    reward = delta_f1 - (0.001 * fp)
 
     agent.update(state, action, reward, new_state)
     agent.save_current_threshold(last_threshold)

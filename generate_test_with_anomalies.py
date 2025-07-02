@@ -1,61 +1,71 @@
-import pandas as pd
-import numpy as np
 import os
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
 
-INPUT_PATH = 'data/CICIDS2017.csv'
-OUTPUT_PATH = 'data/synthetic_zero_day.csv'
-FEATURE_OUTPUT = 'data/synthetic_zero_day_features.csv'  # only features, for model testing
+INPUT_DATA = "data/CICIDS2017_full_clean_fixed.csv"
+OUTPUT_DIR = "data/gaussian_batches"
+BATCH_SIZE = 20000
+ANOMALY_RATIO = 0.05
+STD_DEV = 2.5
+SEED = 42
 
-def inject_anomalies(df, anomaly_ratio=0.01):
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def inject_gaussian_anomalies(df, anomaly_ratio=0.05, std_dev=2.5, seed=None):
+    np.random.seed(seed)
     df = df.copy()
-    num_anomalies = int(anomaly_ratio * len(df))
+    num_rows = len(df)
+    num_anomalies = int(num_rows * anomaly_ratio)
 
-    df['label'] = 0
+    # Identify numeric features
+    feature_columns = df.select_dtypes(include=[np.number]).columns.tolist()
 
-    # Choose sensitive features with high signal-to-noise impact
-    sensitive_cols = [
-        "Flow Duration",
-        "Total Fwd Packets",
-        "Fwd Packet Length Mean"
-    ]
-
-    # Ensure all expected features exist
-    for col in sensitive_cols:
-        if col not in df.columns:
-            raise ValueError(f"Missing column: {col}")
-
-    # Convert to float for numerical stability
-    df[sensitive_cols] = df[sensitive_cols].astype('float64')
-
-    # Randomly pick rows to corrupt
+    # Choose anomaly rows
     anomaly_indices = np.random.choice(df.index, size=num_anomalies, replace=False)
-    df.loc[anomaly_indices, 'label'] = 1
 
-    # Inject amplified Gaussian noise into sensitive columns only
-    for col in sensitive_cols:
-        col_mean = df[col].mean()
-        col_std = df[col].std()
-
-        # Stronger anomaly signal: centered around +3σ with spread of 1.5σ
-        noise = np.random.normal(loc=3 * col_std, scale=1.5 * col_std, size=num_anomalies)
+    # Inject Gaussian noise across all numeric features
+    for col in feature_columns:
+        noise = np.random.normal(loc=0, scale=std_dev, size=num_anomalies)
         df.loc[anomaly_indices, col] += noise
 
-    return df, sensitive_cols
+    # Label data
+    df["label"] = 0
+    df.loc[anomaly_indices, "label"] = 1
 
-def main():
-    if not os.path.exists(INPUT_PATH):
-        print(f"Input file {INPUT_PATH} not found.")
-        return
+    return df
 
-    df = pd.read_csv(INPUT_PATH)
-    df_with_anomalies, used_columns = inject_anomalies(df)
+def create_batches(df, batch_size, output_dir, anomaly_ratio, std_dev, seed=None):
+    num_batches = int(np.ceil(len(df) / batch_size))
 
-    df_with_anomalies.to_csv(OUTPUT_PATH, index=False)
-    df_with_anomalies[used_columns].to_csv(FEATURE_OUTPUT, index=False)
+    for i in range(num_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, len(df))
+        batch_df = df.iloc[start:end].copy()
 
-    print(f"Saved labeled anomalies to {OUTPUT_PATH}")
-    print(f"Saved feature-only test set to {FEATURE_OUTPUT}")
-    print(f"Injected strong noise into: {', '.join(used_columns)}")
+        batch_df = inject_gaussian_anomalies(batch_df, anomaly_ratio=anomaly_ratio, std_dev=std_dev, seed=seed + i if seed else None)
 
-if __name__ == '__main__':
-    main()
+        feature_cols = batch_df.drop(columns=["label"]).columns
+        label_path = os.path.join(output_dir, f"gaussian_batch_{i+1:02d}.csv")
+        feature_path = os.path.join(output_dir, f"gaussian_batch_{i+1:02d}_features.csv")
+
+        batch_df.to_csv(label_path, index=False)
+        batch_df[feature_cols].to_csv(feature_path, index=False)
+
+        print(f"Saved batch {i+1:02d} to {label_path} and {feature_path}")
+
+if __name__ == "__main__":
+    print("Loading input data...")
+    df = pd.read_csv(INPUT_DATA)
+
+    if "label" in df.columns:
+        df = df.drop(columns=["label"])
+
+    print("Normalizing features to [0, 1] range...")
+    scaler = MinMaxScaler()
+    df[df.columns] = scaler.fit_transform(df[df.columns])
+
+    print("Creating batches with synthetic anomalies...")
+    create_batches(df, BATCH_SIZE, OUTPUT_DIR, ANOMALY_RATIO, STD_DEV, SEED)
+
+    print("All batches generated and saved.")
