@@ -99,11 +99,10 @@ for idx, feature_path in enumerate(batch_files, start=1):
     new_f1 = f1_score(y, new_pred, zero_division=0)
     new_state = agent._get_state(new_precision, new_recall, new_f1)
 
+    prev_f1 = f1  # F1 before threshold update
+    reward = new_f1 - prev_f1  # ΔF1 as reward
     tp = int(np.sum((y == 1) & (new_pred == 1)))
     fp = int(np.sum((y == 0) & (new_pred == 1)))
-    prev_f1 = f1  # from earlier, before threshold adjustment
-    delta_f1 = new_f1 - prev_f1
-    reward = delta_f1 - (0.001 * fp)
 
     agent.update(state, action, reward, new_state)
     agent.save_current_threshold(last_threshold)
