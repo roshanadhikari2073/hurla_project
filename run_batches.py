@@ -11,7 +11,9 @@ THRESHOLD_MIN = 1e-4
 THRESHOLD_MAX = 1e-1
 
 MODEL_PATH = "models/autoencoder_model.keras"
-BATCH_DIR = "data/gaussian_batches"
+# BATCH_DIR = "data/gaussian_batches"
+BATCH_DIR = "data/uniform_batches"
+# BATCH_DIR = "data/fixed_batches"
 LOG_DIR = "logs"
 
 METRICS_LOG = os.path.join(LOG_DIR, "batch_metrics_log.csv")
