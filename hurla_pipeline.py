@@ -50,7 +50,7 @@ def run_pipeline(train_path, test_path):
     except:
         labels = [0] * len(scores)
 
-    agent = QLearningAgent()
+    agent = QLearningAgent(actions=[0, 1, 2])
     threshold = agent.get_last_threshold(default=config.THRESHOLD)
     original_threshold = threshold
 
@@ -90,7 +90,7 @@ def run_pipeline(train_path, test_path):
     timestamp = datetime.now().isoformat()
 
     # Persist threshold and update agent
-    agent.update_q_table(state, action, reward, new_state)
+    agent.update(state, action, reward, new_state)
     agent.save_current_threshold(threshold)
 
     # Logs

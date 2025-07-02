@@ -1,8 +1,3 @@
-# ----------------------------------------
-# models/q_learning_agent.py (UPDATED)
-# ----------------------------------------
-# q_learning_agent.py
-
 import os
 import json
 import numpy as np
@@ -18,7 +13,6 @@ class QLearningAgent:
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
-
         if os.path.exists(Q_TABLE_FILE):
             with open(Q_TABLE_FILE, 'r') as f:
                 data = json.load(f)
@@ -34,11 +28,9 @@ class QLearningAgent:
     def update(self, state, action, reward, next_state):
         state_str = self._state_to_str(state)
         next_state_str = self._state_to_str(next_state)
-
         action_index = self.actions.index(action)
         best_next = np.max(self.q_table[next_state_str])
         current_q = self.q_table[state_str][action_index]
-
         self.q_table[state_str][action_index] = current_q + self.alpha * (reward + self.gamma * best_next - current_q)
         self._save_q_table()
 
@@ -61,3 +53,9 @@ class QLearningAgent:
     def save_current_threshold(self, value):
         with open(THRESHOLD_FILE, 'w') as f:
             f.write(f"{value:.6f}")
+
+    def _get_state(self, precision, recall, f1):
+        p_bin = int(precision * 10)
+        r_bin = int(recall * 10)
+        f_bin = int(f1 * 10)
+        return (p_bin, r_bin, f_bin)
