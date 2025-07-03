@@ -11,8 +11,8 @@ THRESHOLD_MIN = 1e-4
 THRESHOLD_MAX = 1e-1
 
 MODEL_PATH = "models/autoencoder_model.keras"
-BATCH_DIR = "data/uniform_batches_seed84"  # Change this per experiment
-SUFFIX = "uniform_seed84"  # Matches your batch dir and experiment identifier
+BATCH_DIR = "data/uniform_batches_seed126"  # Change this per experiment
+SUFFIX = "uniform_seed126"  # Matches your batch dir and experiment identifier
 LOG_DIR = "logs"
 
 METRICS_LOG = os.path.join(LOG_DIR, f"batch_metrics_{SUFFIX}.csv")
