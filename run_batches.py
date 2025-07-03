@@ -4,22 +4,21 @@ import pandas as pd
 import numpy as np
 from tensorflow.keras.models import load_model
 from sklearn.metrics import precision_score, recall_score, f1_score
-
 from models.q_learning_agent import QLearningAgent
 
+# ===== CONFIGURATION =====
 THRESHOLD_MIN = 1e-4
 THRESHOLD_MAX = 1e-1
 
 MODEL_PATH = "models/autoencoder_model.keras"
-# BATCH_DIR = "data/gaussian_batches"
-BATCH_DIR = "data/uniform_batches"
-# BATCH_DIR = "data/fixed_batches"
+BATCH_DIR = "data/uniform_batches_seed42"  # Change this per experiment
+SUFFIX = "uniform_seed42"  # Matches your batch dir and experiment identifier
 LOG_DIR = "logs"
 
-METRICS_LOG = os.path.join(LOG_DIR, "batch_metrics_log.csv")
-REWARD_LOG = os.path.join(LOG_DIR, "gaussian_reward_log.csv")
-THRESHOLD_LOG = os.path.join(LOG_DIR, "gaussian_threshold_log.csv")
-THRESHOLD_TRACKER = os.path.join(LOG_DIR, "last_threshold.txt")
+METRICS_LOG = os.path.join(LOG_DIR, f"batch_metrics_{SUFFIX}.csv")
+REWARD_LOG = os.path.join(LOG_DIR, f"reward_log_{SUFFIX}.csv")
+THRESHOLD_LOG = os.path.join(LOG_DIR, f"threshold_log_{SUFFIX}.csv")
+THRESHOLD_TRACKER = os.path.join(LOG_DIR, "last_threshold.txt")  # Shared across runs unless manually reset
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -29,6 +28,7 @@ model = load_model(MODEL_PATH)
 batch_files = sorted(glob.glob(os.path.join(BATCH_DIR, "*_features.csv")))
 print(f"Found {len(batch_files)} batches in '{BATCH_DIR}'")
 
+# Load or initialize threshold
 if os.path.exists(THRESHOLD_TRACKER):
     with open(THRESHOLD_TRACKER, 'r') as f:
         last_threshold = float(f.read().strip())
@@ -54,12 +54,12 @@ for idx, feature_path in enumerate(batch_files, start=1):
     x_df = pd.read_csv(feature_path)
     full_df = pd.read_csv(label_path)
 
-    if 'label' not in full_df.columns:
+    if "label" not in full_df.columns:
         print(f"Missing 'label' column in {label_path}, skipping...")
         continue
 
     x = x_df.values.astype("float64")
-    y = full_df['label'].astype(int).values
+    y = full_df["label"].astype(int).values
 
     x_pred = model.predict(x, verbose=0)
     mse = np.mean(np.square(x - x_pred), axis=1)
@@ -88,12 +88,9 @@ for idx, feature_path in enumerate(batch_files, start=1):
         last_threshold *= 0.5
     elif action == 2:
         last_threshold *= 1.5
-        
+
     last_threshold = np.clip(last_threshold, THRESHOLD_MIN, THRESHOLD_MAX)
-        
-    # Ensure threshold doesn't go below a practical floor
-    MIN_THRESHOLD = 1e-6
-    last_threshold = max(last_threshold, MIN_THRESHOLD)
+    last_threshold = max(last_threshold, 1e-6)
 
     new_pred = (mse > last_threshold).astype(int)
     new_precision = precision_score(y, new_pred, zero_division=0)
@@ -101,8 +98,7 @@ for idx, feature_path in enumerate(batch_files, start=1):
     new_f1 = f1_score(y, new_pred, zero_division=0)
     new_state = agent._get_state(new_precision, new_recall, new_f1)
 
-    prev_f1 = f1  # F1 before threshold update
-    reward = new_f1 - prev_f1  # ΔF1 as reward
+    reward = new_f1 - f1
     tp = int(np.sum((y == 1) & (new_pred == 1)))
     fp = int(np.sum((y == 0) & (new_pred == 1)))
 
