@@ -1,19 +1,7 @@
-# config.py
-
-# Path to training dataset (preprocessed numeric features)
-TRAIN_PATH = "data/CICIDS2017_features.csv"
-
-# Path to test dataset (used for manual or fallback testing)
-TEST_PATH = "data/synthetic_zero_day_features.csv"
-
-# Default fallback threshold (in case no prior value is saved)
-THRESHOLD = 0.002582674299179656
-
-# Trained autoencoder model file
-MODEL_PATH = "models/autoencoder_model.keras"
-
-# Updated Q-table JSON path for new adaptive Q-learning agent
+# config.py ── canonical paths for CICIDS-2018 run
+TRAIN_PATH   = "data/processed/CICIDS2018_benign_cleaned.csv"   # now the 77-col clean matrix
+MODEL_PATH   = "models/autoencoder_2018.keras"
+SCALER_PATH  = "models/minmax_scaler_2018.pkl"
+EXPECTED_COL = "models/expected_columns_2018.txt"               # new: the 77 column names
+THRESHOLD    = 0.002                                            # starter cut-off; Q-agent will adjust
 Q_TABLE_PATH = "models/q_table.json"
-
-# Optional: Cleaned full dataset (used in batch generation or analysis)
-INPUT_FILE = "data/CICIDS2017_full_cleaned.csv"
