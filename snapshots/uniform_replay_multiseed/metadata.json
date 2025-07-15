@@ -1,0 +1,14 @@
+{
+    "run_id": "uniform_replay_multiseed",
+    "description": "Multi-seed validation snapshot of adaptive Q-learning thresholding",
+    "seeds": [
+        7,
+        42,
+        99,
+        123,
+        2025
+    ],
+    "metrics_log_count": 5,
+    "q_table_type": "shared-copy-per-seed",
+    "threshold_type": "shared-copy-per-seed"
+}
