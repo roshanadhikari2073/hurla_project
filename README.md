@@ -134,16 +134,4 @@ Our threshold adaptation problem violated every one of those expectations. The e
 
 Tabular Q-learning was not capable of handling the demands of this setting. Its shallow state representation rigid update scheme and lack of adaptability made it inadequate. The system was not able to evolve or converge under such high variability and reward sparsity
 
-### What Comes Next
-
-To address these limitations we plan to implement more advanced agents:
-
-- **Deep Q-Networks** with richer input features and neural function approximation  
-- **Policy Gradient Models** that can learn stochastic policies  
-- **Replay Buffers and Target Networks** to provide stable and long-term learning  
-- **Expanded State Descriptions** that include anchor stats class ratios and recent batch trends  
-- **Smoothed and Normalized Rewards** that make learning gradients more consistent
-
-With these enhancements we expect the system to be more intelligent and flexible and better able to handle real-world traffic conditions while achieving high precision anomaly detection
-
 ---
