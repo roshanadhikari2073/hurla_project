@@ -1,7 +1,3 @@
-Here is a professional, fully structured Git-style README based on your detailed report. The format adheres to best practices for documentation in applied machine learning experiments, clearly highlighting tools, techniques, observations, and the failure rationale in a logically organized and scientific tone.
-
-⸻
-
 CICIDS2018 Q-Learning Threshold Tuning: Failure Analysis Report
 
 Tools and Techniques Used
