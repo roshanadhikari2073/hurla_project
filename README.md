@@ -1,73 +1,80 @@
+
 # CICIDS2018 Threshold Adaptation with Tabular Q-Learning
 
-This project explores the limitations of applying a tabular Q-learning agent to adaptive threshold tuning in the CICIDS2018 dataset. Despite several reinforcement learning strategies and threshold adjustment techniques, the agent consistently failed to converge on effective precision-first anomaly detection. This document presents a comprehensive breakdown of the agent’s design, data dynamics, observed behaviors, and why tabular Q-learning is fundamentally inadequate for this type of non-stationary, high-volume environment.
+This project investigates why a tabular Q-learning agent struggled to adapt threshold values effectively for anomaly detection in the CICIDS2018 dataset. Despite employing reinforcement learning and dynamic threshold adjustment techniques the agent consistently failed to achieve precision-first anomaly tuning. This document outlines the agent’s design logic, the dataset dynamics, key experimental behaviors, and the underlying reasons why tabular Q-learning turned out to be a poor fit for such a complex environment.
 
 ---
 
-## Tools and Techniques
+## Tools and Techniques Used
 
-- **Dataset**: CICIDS2018 daily flow-based CSVs (Feb–Mar 2018)
-- **RL Method**: Tabular Q-Learning with ε-greedy exploration (ε ≈ 0.2)
-- **State Representation**: Discretized buckets of (precision, recall, F1), 11×11×11 = 1,331 states
-- **Reward Formula**: `2·TP₂ − 20·FP₂ + small recall bonus`
-- **Threshold Initialization**: EMA-smoothed anchor from training data
-- **Threshold Adjustment Actions**: ±10% or hold
-- **Update Rule**: One-step temporal difference (TD)
-- **Persistence**: Q-table and threshold saved per batch for continuity
-- **Feature Drift Assessment**: Kolmogorov–Smirnov (KS) statistical test
+- **Dataset**: CICIDS2018 daily flow-based CSVs from February and March 2018  
+- **Reinforcement Learning Strategy**: Tabular Q-Learning using ε-greedy exploration (ε ≈ 0.2)  
+- **State Encoding**: Discrete buckets based on precision recall and F1 score resulting in a 3D space of 11 × 11 × 11 = 1,331 total states  
+- **Reward Function**:  
+
+Reward = (2 × TP₂) − (20 × FP₂) + small recall bonus
+
+- **Threshold Initialization**: Derived from exponentially smoothed moving average based on training-time anchor values  
+- **Threshold Actions Available**: Increase by 10%, decrease by 10% or hold  
+- **Learning Update Rule**: Single-step temporal difference (TD) update  
+- **Persistence**: Q-table and threshold values were saved after each batch for continuity  
+- **Feature Drift Analysis**: Performed using Kolmogorov–Smirnov tests to quantify daily distribution shifts
 
 ---
 
 ## Dataset Overview
 
-Each batch represented a day’s worth of flow records in CICIDS2018. We used over 10 daily files between February and March 2018, with more than 1 million flows per batch. Attack-to-benign ratios varied significantly across days, and feature distributions shifted widely.
+Each CSV file represented a single day's worth of flow records from CICIDS2018. We focused on over ten daily files across February and March 2018. Every batch had more than a million records and the ratio of attack to benign flows fluctuated heavily.
 
 | Date         | Total Flows | Benign       | Attacks     |
 |--------------|-------------|--------------|-------------|
 | 02-14-2018   | 1,048,575   | 667,626      | 380,949     |
 | 02-15-2018   | 1,048,575   | 996,077      | 52,498      |
 | 02-16-2018   | 1,048,575   | 1,006,439    | 42,136      |
-| 02-20–03-02  | ~1,000,000  | Varies       | Varies      |
+| 02-20–03-02  | ~1,000,000  | varies       | varies      |
 
-### Key Characteristics
+### Dataset Characteristics
 
-- **High volume**: Over 1 million samples per day, making batch adaptation computationally demanding.
-- **Severe class imbalance**: Attack prevalence ranged from approximately 36% to below 1%.
-- **Drifted features**: KS-tests revealed statistically significant distributional shifts across all 77 features. Metrics like `Flow Duration`, `Total Length of Fwd Packets`, and `Avg Packet Size` showed magnitude-level variability between days.
+- The volume was consistently high with over a million rows per batch which made per-batch tuning computationally expensive  
+- Class imbalance varied sharply with some days having attack prevalence as low as 0.3% and others exceeding 30%  
+- Feature drift was extremely prominent with statistical tests showing that nearly all 77 features had significant distributional changes across days. Key metrics like `Flow Duration` and `Avg Packet Size` changed dramatically
 
 ---
 
 ## Q-Learning Agent Workflow
 
-The agent was designed to adapt the anomaly-score threshold across batches based on per-batch evaluation feedback.
+The tabular agent was intended to adapt the anomaly detection threshold across each batch using simple performance feedback.
 
-### Step-by-Step Process
+### Step-by-Step Procedure
 
-1. **Observe**: Apply current threshold to compute precision, recall, and F1-score.
-2. **Choose Action**: ε-greedy selection among [−10%, 0%, +10%] threshold adjustment.
-3. **Reward Calculation**:
-   \[
-   \text{Reward} = 2·TP₂ - 20·FP₂ + \text{(recall bonus)}
-   \]
-4. **Update Q-Table**:
-   \[
-   Q(s, a) \leftarrow Q(s, a) + \alpha \left[R + \gamma \cdot \max_{a'} Q(s', a') - Q(s, a)\right]
-   \]
-5. **Persist**: Save updated Q-table and new threshold for the next batch.
+1. **Observe**: Compute precision recall and F1 score using the current threshold  
+2. **Select Action**: Choose among three possible actions using ε-greedy logic  
+ - Lower the threshold by 10%  
+ - Keep it unchanged  
+ - Raise it by 10%  
+3. **Reward Calculation**:  
 
-### State Space
+Reward = (2 × TP₂) − (20 × FP₂) + recall bonus
 
-- Discrete 3D grid of (precision, recall, F1) values
-- Each dimension bucketed from 0.0 to 1.0 in 0.1 increments
-- Total number of states: 11 × 11 × 11 = 1,331
+4. **Update the Q-table** using the temporal difference update rule:  
+
+Q(s, a) = Q(s, a) + α × [R + γ × max(Q(s’, a’)) − Q(s, a)]
+
+5. **Persist State**: Save the current Q-table and the latest threshold value for use with the next batch
+
+### State Design
+
+- The agent's state space consisted of 3D buckets based on precision recall and F1 scores  
+- Each of the three metrics ranged from 0.0 to 1.0 with increments of 0.1  
+- This yielded 11 × 11 × 11 = 1,331 total states in the Q-table
 
 ---
 
-## Observations and Outcomes
+## Observed Results and Behavior
 
-Despite dozens of runs with adjusted hyperparameters, different reward functions, and batch-specific preprocessing enhancements, the agent failed to learn meaningful threshold policies.
+Even after testing multiple code variants changes in reward weightings and batch-level preprocessing the agent never learned a meaningful or robust thresholding policy.
 
-### Representative Results
+### Sample Performance Across Batches
 
 | File          | Init Thr | Final Thr   | Precision (1st→2nd) | Recall (1st→2nd) |
 |---------------|----------|-------------|----------------------|------------------|
@@ -77,70 +84,66 @@ Despite dozens of runs with adjusted hyperparameters, different reward functions
 | 02-20-2018    | 8.00     | 8.00        | 0.146 → 0.143        | 0.503 → 0.503    |
 | 02-21-2018    | 8.00     | ~7.20       | 1.000 → 1.000        | 0.241 → 0.241    |
 
-### Failure Patterns
+### Behavior Trends
 
-- **Minimal threshold change**: Most thresholds remained pinned around the initial value of 8.0.
-- **Precision plateau**: In low-attack scenarios, precision failed to improve significantly.
-- **Recall collapse**: On sparse-attack days, the agent was unable to compensate by lowering the threshold.
-- **Inertia**: Thresholds stagnated despite reward shaping, EMA smoothing, and dynamic anchor capping.
+- Threshold values barely changed across batches staying close to the initial value of 8.0  
+- Precision improvements were limited even when attack frequency changed  
+- On days with very rare attacks recall often collapsed and the agent failed to recover  
+- The agent showed inertia and rarely escaped its initial behavior pattern
 
 ---
 
 ## Root Causes of Failure
 
-### 1. Over-Simplified State Encoding
+### Simplistic State Encoding
 
-The agent represented each batch by only three scalar values—precision, recall, and F1—eliminating important contextual data such as class balance, anchor magnitude, or feature drift. This severely limited the agent’s capacity to generalize or differentiate batch complexity.
+By collapsing a batch of over a million rows into just three numbers the agent was deprived of deeper information like actual attack density class distribution shift or anchor drift
 
-### 2. Non-Stationary, Noisy Input Distribution
+### Non-Stationary Input Conditions
 
-Each day’s batch represented a radically different distribution due to network context changes. Traditional Q-learning assumes a Markov process with stationary transitions, which was clearly violated in this scenario.
+Every day had a completely different data profile. Standard Q-learning assumes a stable Markov process but that assumption breaks in dynamic network data like this
 
-### 3. Sparse and Low-Magnitude Rewards
+### Weak and Sparse Rewards
 
-When attack prevalence dropped below 1%, both true positives and false positives were rare, resulting in near-zero rewards. The agent had little signal to differentiate between good and bad actions.
+With attack counts below 1% reward values were extremely small giving the agent very little signal to learn from
 
-### 4. Inadequate Exploration and Learning Depth
+### Insufficient Exploration and Learning
 
-With ε=0.2 and a single episode per batch, the agent explored very little. Its one-step TD updates barely influenced the Q-table, which lacked the granularity to adapt across highly variable days.
+With only one episode per batch and a low exploration rate the agent had very few chances to meaningfully try new actions
 
-### 5. Poor Reward Surface Design
+### Misaligned Reward Surface
 
-The reward’s steep FP penalty (−20 per false positive) made the agent risk-averse. It gravitated toward inaction and preserved status quo behaviors, failing to discover thresholds that truly improved precision-recall trade-offs.
-
----
-
-## Why Tabular Q-Learning Was a Poor Fit
-
-Tabular Q-learning is ideal for environments that are:
-
-- Small and finite in state space
-- Stationary in transitions and rewards
-- Frequent in reward delivery (dense feedback)
-- Trained over many episodes with full state-action coverage
-
-The CICIDS2018 batches violated every one of these assumptions. The combination of high-dimensionality, concept drift, and rare-event detection made it an ill-suited environment for traditional tabular methods.
+The use of a steep false positive penalty made the agent overly cautious. It defaulted to safe non-adaptive thresholds instead of making learning-driven changes
 
 ---
 
-## Conclusion and Future Directions
+## Why Tabular Q-Learning Did Not Fit
 
-The tabular Q-learning agent did not perform adequately under the demands of the CICIDS2018 setting. Its simplified state space, sparse rewards, and inability to adjust to temporal shifts rendered it ineffective for precision-oriented threshold tuning. The system remained mostly static and blind to the contextual dynamics of each batch.
+Tabular Q-learning works best when the environment is:
 
-### Planned Enhancements
+- Small and discrete  
+- Statistically stable over time  
+- Provides frequent feedback  
+- Allows repeated exploration of every state-action combination
 
-To overcome these limitations, the following improvements are planned:
-
-- **Deep Q-Networks (DQN)** to leverage neural approximations over continuous state inputs
-- **Policy Gradient Methods** to enable smooth, stochastic action selection
-- **Replay Memory and Target Networks** for more stable Q-value propagation
-- **Context-Rich States** including anchor trends, class distributions, and recent batch metadata
-- **Reward Normalization** to ensure meaningful, scale-aware feedback for precision-first learning
-
-These enhancements aim to produce a robust, intelligent, and adaptive anomaly detection framework suitable for real-world network environments.
+Our threshold adaptation problem violated every one of those expectations. The environment was large noisy and shifting with feedback too sparse to train a simple lookup-table-based agent
 
 ---
 
-## Contact
+## Conclusion and Next Steps
 
-For technical inquiries, implementation details, or research discussions, please open an issue in this repository or reach out through the GitHub discussion board.
+Tabular Q-learning was not capable of handling the demands of this setting. Its shallow state representation rigid update scheme and lack of adaptability made it inadequate. The system was not able to evolve or converge under such high variability and reward sparsity
+
+### What Comes Next
+
+To address these limitations we plan to implement more advanced agents:
+
+- **Deep Q-Networks** with richer input features and neural function approximation  
+- **Policy Gradient Models** that can learn stochastic policies  
+- **Replay Buffers and Target Networks** to provide stable and long-term learning  
+- **Expanded State Descriptions** that include anchor stats class ratios and recent batch trends  
+- **Smoothed and Normalized Rewards** that make learning gradients more consistent
+
+With these enhancements we expect the system to be more intelligent and flexible and better able to handle real-world traffic conditions while achieving high precision anomaly detection
+
+---
