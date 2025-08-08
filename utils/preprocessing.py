@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 
+
 def load_and_preprocess(csv_path):
     # Load the dataset
     df = pd.read_csv(csv_path)
@@ -26,6 +27,7 @@ def load_and_preprocess(csv_path):
     X = scaler.fit_transform(df)
 
     return X
+
 
 # Alias used in hurla_pipeline.py
 preprocess_data = load_and_preprocess

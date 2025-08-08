@@ -1,26 +1,29 @@
-from sklearn.metrics import confusion_matrix, f1_score, accuracy_score
 
 def evaluate(preds, labels):
     """
-    Evaluate classification performance using standard metrics,
-    including full confusion matrix components for reward shaping.
+    Evaluate classification performance using standard metrics without
+    external dependencies. Handles cases where only a single class is
+    present in ``preds`` or ``labels``.
     """
+    tp = sum(1 for p, l in zip(preds, labels) if p == 1 and l == 1)
+    tn = sum(1 for p, l in zip(preds, labels) if p == 0 and l == 0)
+    fp = sum(1 for p, l in zip(preds, labels) if p == 1 and l == 0)
+    fn = sum(1 for p, l in zip(preds, labels) if p == 0 and l == 1)
 
-    # Compute confusion matrix: TN, FP, FN, TP
-    tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
+    total = len(labels)
+    accuracy = (tp + tn) / total if total else 0.0
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    fpr = fp / (fp + tn) if (fp + tn) else 0.0
 
-    # Calculate standard classification metrics
-    accuracy = accuracy_score(labels, preds)
-    f1 = f1_score(labels, preds, zero_division=0)
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-
-    # Return a dictionary of evaluation metrics with clarity
     return {
         "Accuracy": accuracy,
         "F1": f1,
         "FPR": fpr,
-        "TP": int(tp),
-        "FP": int(fp),
-        "TN": int(tn),
-        "FN": int(fn)
+        "TP": tp,
+        "FP": fp,
+        "TN": tn,
+        "FN": fn,
     }
+
